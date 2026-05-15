@@ -11,9 +11,6 @@ from model import load_model
 
 
 def init_wandb(config: FinetuneConfig, accelerator: Accelerator):
-
-
-def init_wandb(config: FinetuneConfig, accelerator: Accelerator):
     try:
         import wandb
         if accelerator.is_main_process:

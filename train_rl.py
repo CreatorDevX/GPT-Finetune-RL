@@ -1,6 +1,9 @@
 import os
 import math
 import random
+
+os.environ.setdefault("PEFT_DISABLE_TORCHAO", "1")
+
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator

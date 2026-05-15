@@ -5,6 +5,9 @@ import json
 import torch
 from dataclasses import dataclass
 from typing import Optional
+
+os.environ.setdefault("PEFT_DISABLE_TORCHAO", "1")
+
 from accelerate import Accelerator
 
 from config import FinetuneConfig

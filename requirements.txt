@@ -1,0 +1,18 @@
+# For TPU v5e, install torch + torch-xla from Google's TPU wheels:
+#   pip install torch~=2.5.0 torch-xla~=2.5.0 -f https://storage.googleapis.com/libtpu-releases/index.html
+#   export PJRT_DEVICE=TPU
+#
+# For GPU, drop torch-xla and use standard torch (CUDA):
+#   pip install torch~=2.5.0 --index-url https://download.pytorch.org/whl/cu121
+#   (remove torch-xla line below)
+
+torch>=2.5.0
+torch-xla>=2.5.0
+transformers>=4.47.0
+accelerate>=1.2.0
+peft>=0.14.0
+datasets>=3.2.0
+tqdm>=4.67.0
+wandb>=0.19.0
+# bitsandbytes is only needed for QLoRA on GPU (not TPU)
+bitsandbytes>=0.45.0
