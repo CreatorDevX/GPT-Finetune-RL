@@ -4,7 +4,7 @@ from typing import Optional
 
 @dataclass
 class FinetuneConfig:
-    model_name: str = "gpt2-xl"
+    model_name: str = "EleutherAI/pythia-1b"
     model_local_path: Optional[str] = None
     use_lora: bool = True
     use_qlora: bool = False  # 4-bit quantization (requires bitsandbytes)

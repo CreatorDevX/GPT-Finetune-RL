@@ -14,7 +14,7 @@ from train import train as sft_train
 
 @dataclass
 class PipelineConfig:
-    model_name: str = "gpt2-xl"
+    model_name: str = "EleutherAI/pythia-1b"
     sft_output_dir: str = "./sft-gpt2xl-smoltalk"
     rl_output_dir: str = "./rl-gpt2xl-gsm8k"
     benchmark_output: str = "./benchmark_results.json"

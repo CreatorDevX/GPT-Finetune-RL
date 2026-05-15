@@ -11,7 +11,7 @@ from config import FinetuneConfig
 
 def load_tokenizer(config: FinetuneConfig) -> AutoTokenizer:
     model_name = config.model_local_path or config.model_name
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision="step10000", trust_remote_code=True)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -48,6 +48,7 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
+        revision="step10000",
         dtype=torch_dtype,
         quantization_config=quant_config,
         device_map="auto" if quant_config else None,
@@ -55,7 +56,6 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
     )
 
     model.config.use_cache = False
-    model.gradient_checkpointing_enable()
 
     if tokenizer is not None:
         model.resize_token_embeddings(len(tokenizer))

@@ -36,7 +36,7 @@ class RLConfig:
     eval_examples: int = 100
 
     # Model
-    base_model_name: str = "gpt2-xl"
+    base_model_name: str = "EleutherAI/pythia-1b"
     sft_checkpoint: Optional[str] = "./gpt2-xl-smoltalk"
     use_lora: bool = True
     lora_r: int = 16
@@ -55,7 +55,7 @@ def _default_lora_targets(model_name: str) -> str:
 
 
 def load_model_for_rl(config: RLConfig):
-    tokenizer = AutoTokenizer.from_pretrained(config.base_model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(config.base_model_name, revision="step10000", trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.chat_template is None:
@@ -70,7 +70,8 @@ def load_model_for_rl(config: RLConfig):
 
     model = AutoModelForCausalLM.from_pretrained(
         config.base_model_name,
-        dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
+        revision="step10000",
+        torch_dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
         trust_remote_code=True,
     )
     model.config.use_cache = False
