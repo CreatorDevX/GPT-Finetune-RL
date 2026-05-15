@@ -55,6 +55,7 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
     )
 
     model.config.use_cache = False
+    model.gradient_checkpointing_enable()
 
     if tokenizer is not None:
         model.resize_token_embeddings(len(tokenizer))

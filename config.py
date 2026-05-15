@@ -18,7 +18,7 @@ class FinetuneConfig:
     subset_fraction: float = 0.1
 
     max_seq_length: int = 1024
-    batch_size: int = 4
+    batch_size: int = 2
     gradient_accumulation_steps: int = 8
     learning_rate: float = 2e-4
     num_epochs: int = 1
