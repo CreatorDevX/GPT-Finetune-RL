@@ -13,6 +13,51 @@ from typing import Optional
 from gsm8k_utils import extract_answer, load_gsm8k, format_prompt, compute_reward
 
 
+def init_wandb(config: RLConfig, accelerator: Accelerator):
+    try:
+        import wandb
+        if accelerator.is_main_process:
+            wandb.init(
+                project="rl-reinforce-gsm8k",
+                config={
+                    "base_model_name": config.base_model_name,
+                    "sft_checkpoint": config.sft_checkpoint,
+                    "use_lora": config.use_lora,
+                    "use_svd_quant": config.use_svd_quant,
+                    "svd_rank": config.svd_rank,
+                    "lora_r": config.lora_r,
+                    "lora_alpha": config.lora_alpha,
+                    "lora_dropout": config.lora_dropout,
+                    "num_samples": config.num_samples,
+                    "max_new_tokens": config.max_new_tokens,
+                    "temperature": config.temperature,
+                    "top_k": config.top_k,
+                    "questions_per_batch": config.questions_per_batch,
+                    "gradient_accumulation_steps": config.gradient_accumulation_steps,
+                    "learning_rate": config.learning_rate,
+                    "num_epochs": config.num_epochs,
+                    "warmup_ratio": config.warmup_ratio,
+                    "mixed_precision": config.mixed_precision,
+                    "seed": config.seed,
+                    "max_grad_norm": config.max_grad_norm,
+                    "eval_steps": config.eval_steps,
+                    "eval_examples": config.eval_examples,
+                },
+            )
+        return True
+    except ImportError:
+        return False
+
+
+def log_wandb(metrics: dict, step: int):
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics, step=step)
+    except Exception:
+        pass
+
+
 @dataclass
 class RLConfig:
     # Rollout generation
@@ -75,14 +120,15 @@ def load_model_for_rl(config: RLConfig):
         config.base_model_name,
         revision="step10000",
         torch_dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
+        device_map="auto",
         trust_remote_code=True,
     )
     model.config.use_cache = False
 
     if config.use_svd_quant:
-        from svd_quant import apply_svd_quant_to_model, MasterWeightManager, print_svd_trainable_info
-        model = apply_svd_quant_to_model(model, rank=config.svd_rank)
-        print_svd_trainable_info(model)
+        from svd_quant import apply_svd_to_model, MasterWeightManager, print_svd_info
+        model = apply_svd_to_model(model, rank=config.svd_rank)
+        print_svd_info(model)
         master_mgr = MasterWeightManager(model, os.path.join(config.output_dir, "master_weights.pt"))
         model.master_weight_manager = master_mgr
     else:
@@ -156,7 +202,7 @@ def generate_rollouts(model, tokenizer, questions, ground_truths, config: RLConf
     else:
         advantages = (rewards_t - mean_r) / (std_r + 1e-8)
 
-    return all_rollouts, advantages
+    return all_rollouts, advantages, all_rewards
 
 
 def collate_rollouts(rollouts, advantages, pad_token_id, device):
@@ -241,7 +287,7 @@ def train_rl(config: RLConfig):
     set_seed(config.seed)
 
     model, tokenizer = load_model_for_rl(config)
-    model = model.to(device)
+    device = next(model.parameters()).device
 
     train_ds = load_gsm8k(split="train")
     print(f"Loaded GSM8K train: {len(train_ds)} examples")
@@ -259,6 +305,8 @@ def train_rl(config: RLConfig):
     )
 
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
+
+    use_wandb = init_wandb(config, accelerator)
 
     global_step = 0
     accumulated_loss = 0.0
@@ -278,7 +326,7 @@ def train_rl(config: RLConfig):
             questions = [train_ds[i]["question"] for i in batch_indices]
             ground_truths = [extract_answer(train_ds[i]["answer"]) for i in batch_indices]
 
-            rollouts, advantages = generate_rollouts(
+            rollouts, advantages, rewards = generate_rollouts(
                 accelerator.unwrap_model(model), tokenizer,
                 questions, ground_truths, config, device
             )
@@ -290,8 +338,7 @@ def train_rl(config: RLConfig):
                 loss = compute_pg_loss(model, inputs, targets, advs)
                 accelerator.backward(loss)
 
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+                grad_norm = accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
                 optimizer.step()
                 scheduler.step()
@@ -310,6 +357,27 @@ def train_rl(config: RLConfig):
                         "lr": f"{lr:.2e}",
                     })
                     tqdm.write(f"Step {global_step:05d} | loss: {avg_loss:.4f}")
+
+                    if use_wandb:
+                        reward_mean = sum(rewards) / len(rewards) if rewards else 0.0
+                        reward_std = (sum((r - reward_mean) ** 2 for r in rewards) / max(len(rewards), 1)) ** 0.5
+                        reward_max = max(rewards) if rewards else 0.0
+                        reward_min = min(rewards) if rewards else 0.0
+                        log_wandb({
+                            "rl/loss": avg_loss,
+                            "rl/learning_rate": lr,
+                            "rl/gradient_norm": grad_norm,
+                            "rl/epoch": epoch,
+                            "rl/global_step": global_step,
+                            "rl/progress": global_step / max(total_steps, 1),
+                            "rl/reward_mean": reward_mean,
+                            "rl/reward_std": reward_std,
+                            "rl/reward_max": reward_max,
+                            "rl/reward_min": reward_min,
+                            "rl/advantage_mean": advs.mean().item(),
+                            "rl/advantage_std": advs.std().item(),
+                        }, step=global_step)
+
                     accumulated_loss = 0.0
 
             if accelerator.sync_gradients and global_step % config.eval_steps == 0:
@@ -319,12 +387,23 @@ def train_rl(config: RLConfig):
                     num_examples=config.eval_examples
                 )
                 tqdm.write(f"Step {global_step:05d} | Eval accuracy (GSM8K): {eval_acc:.4f}")
+
+                if use_wandb:
+                    log_wandb({
+                        "rl/eval_accuracy": eval_acc,
+                        "rl/best_eval_accuracy": max(eval_acc, best_eval_acc),
+                        "rl/eval_step": global_step,
+                    }, step=global_step)
+
                 if eval_acc > best_eval_acc:
                     best_eval_acc = eval_acc
                     os.makedirs(config.output_dir, exist_ok=True)
                     unwrapped.save_pretrained(config.output_dir)
                     tokenizer.save_pretrained(config.output_dir)
                     tqdm.write(f"  -> Saved best model to {config.output_dir}")
+
+                    if use_wandb:
+                        log_wandb({"rl/best_model_saved": True}, step=global_step)
 
             if accelerator.sync_gradients and global_step % config.save_steps == 0:
                 unwrapped = accelerator.unwrap_model(model)
@@ -333,6 +412,9 @@ def train_rl(config: RLConfig):
                 unwrapped.save_pretrained(ckpt_path)
                 tokenizer.save_pretrained(ckpt_path)
                 tqdm.write(f"Checkpoint saved: {ckpt_path}")
+
+                if use_wandb:
+                    log_wandb({"rl/checkpoint_saved": ckpt_path}, step=global_step)
 
     progress_bar.close()
 
@@ -347,6 +429,9 @@ def train_rl(config: RLConfig):
         tokenizer.save_pretrained(config.output_dir)
         print(f"Final model saved: {config.output_dir}")
         print(f"Best eval accuracy: {best_eval_acc:.4f}")
+
+        if use_wandb:
+            wandb.finish()
 
 
 if __name__ == "__main__":

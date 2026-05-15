@@ -51,7 +51,7 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
         revision="step10000",
         torch_dtype=torch_dtype,
         quantization_config=quant_config,
-        device_map="auto" if quant_config else None,
+        device_map="auto",
         trust_remote_code=True,
     )
 
@@ -61,8 +61,9 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
         model.resize_token_embeddings(len(tokenizer))
 
     if config.use_svd_quant:
-        from svd_quant import apply_svd_quant_to_model, MasterWeightManager, print_svd_info
-        model = apply_svd_quant_to_model(model, rank=config.svd_rank)
+        from svd_quant import apply_svd_to_model, MasterWeightManager, print_svd_info
+        print("Applying SVD factorization to base weights (GPU)...")
+        model = apply_svd_to_model(model, rank=config.svd_rank)
         print_svd_info(model)
         master_mgr = MasterWeightManager(model, config.master_weights_path)
         model.master_weight_manager = master_mgr

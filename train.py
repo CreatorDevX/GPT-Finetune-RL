@@ -9,6 +9,50 @@ from accelerate import Accelerator
 from config import FinetuneConfig
 
 
+def init_wandb(config: FinetuneConfig, accelerator: Accelerator):
+    try:
+        import wandb
+        if accelerator.is_main_process:
+            wandb.init(
+                project="sft-finetune",
+                config={
+                    "model_name": config.model_name,
+                    "model_local_path": config.model_local_path,
+                    "use_lora": config.use_lora,
+                    "use_qlora": config.use_qlora,
+                    "use_svd_quant": config.use_svd_quant,
+                    "svd_rank": config.svd_rank,
+                    "lora_r": config.lora_r,
+                    "lora_alpha": config.lora_alpha,
+                    "lora_dropout": config.lora_dropout,
+                    "dataset_name": config.dataset_name,
+                    "dataset_configs": config.dataset_configs,
+                    "subset_fraction": config.subset_fraction,
+                    "max_seq_length": config.max_seq_length,
+                    "batch_size": config.batch_size,
+                    "gradient_accumulation_steps": config.gradient_accumulation_steps,
+                    "learning_rate": config.learning_rate,
+                    "num_epochs": config.num_epochs,
+                    "warmup_ratio": config.warmup_ratio,
+                    "mixed_precision": config.mixed_precision,
+                    "seed": config.seed,
+                    "max_grad_norm": config.max_grad_norm,
+                },
+            )
+        return True
+    except ImportError:
+        return False
+
+
+def log_wandb(metrics: dict, step: int):
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics, step=step)
+    except Exception:
+        pass
+
+
 def train(config: FinetuneConfig, model, tokenizer, train_dataset):
     accelerator = Accelerator(
         gradient_accumulation_steps=config.gradient_accumulation_steps,
@@ -61,6 +105,8 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
         model, optimizer, train_dataloader, lr_scheduler
     )
 
+    use_wandb = init_wandb(config, accelerator)
+
     global_step = 0
     accumulated_loss = 0.0
     model.train()
@@ -79,8 +125,7 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
                 loss = outputs.loss
                 accelerator.backward(loss)
 
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+                grad_norm = accelerator.clip_grad_norm_(model.parameters(), config.max_grad_norm)
 
                 optimizer.step()
                 lr_scheduler.step()
@@ -100,6 +145,18 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
                         "ppl": f"{ppl:.2f}",
                         "lr": f"{lr:.2e}",
                     })
+
+                    if use_wandb:
+                        log_wandb({
+                            "train/loss": avg_loss,
+                            "train/perplexity": ppl,
+                            "train/learning_rate": lr,
+                            "train/gradient_norm": grad_norm,
+                            "train/epoch": epoch,
+                            "train/global_step": global_step,
+                            "train/progress": global_step / max(total_steps, 1),
+                        }, step=global_step)
+
                     accumulated_loss = 0.0
 
                 if global_step % config.save_steps == 0:
@@ -109,6 +166,9 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
                         accelerator.unwrap_model(model).save_pretrained(ckpt_path)
                         tokenizer.save_pretrained(ckpt_path)
                         print(f"Checkpoint saved: {ckpt_path}")
+
+                        if use_wandb:
+                            log_wandb({"checkpoint/saved": ckpt_path}, step=global_step)
 
         progress_bar.close()
 
@@ -123,3 +183,6 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
             unwrapped.save_pretrained(config.output_dir)
             tokenizer.save_pretrained(config.output_dir)
             print(f"Model saved: {config.output_dir}")
+
+        if use_wandb:
+            wandb.finish()
