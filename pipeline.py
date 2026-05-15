@@ -20,12 +20,12 @@ class PipelineConfig:
     benchmark_output: str = "./benchmark_results.json"
 
     # SFT
-    sft_batch_size: int = 2
+    sft_batch_size: int = 4
     sft_grad_accum: int = 8
     sft_lr: float = 2e-4
     sft_epochs: int = 1
     sft_max_seq_len: int = 1024
-    sft_subset_fraction: float = 0.1
+    sft_subset_fraction: float = 1.0
     sft_warmup_ratio: float = 0.03
 
     # RL

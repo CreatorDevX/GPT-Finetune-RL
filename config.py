@@ -11,18 +11,14 @@ class FinetuneConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    target_modules: Optional[list] = None
+    target_modules: Optional[list | str] = None
 
     dataset_name: str = "HuggingFaceTB/smoltalk"
-    dataset_configs: tuple = (
-        "everyday-conversations",
-        "model-instruct",
-        "multi-turn-conversations",
-    )
+    dataset_configs: tuple = ("all",)
     subset_fraction: float = 0.1
 
     max_seq_length: int = 1024
-    batch_size: int = 2
+    batch_size: int = 4
     gradient_accumulation_steps: int = 8
     learning_rate: float = 2e-4
     num_epochs: int = 1

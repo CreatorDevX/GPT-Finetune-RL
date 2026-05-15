@@ -42,7 +42,7 @@ class RLConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    target_modules: Optional[list] = None
+    target_modules: Optional[list | str] = None
 
     # System
     mixed_precision: str = "fp16"
@@ -50,18 +50,8 @@ class RLConfig:
     max_grad_norm: float = 1.0
 
 
-def _default_lora_targets(model_name: str) -> list:
-    name = model_name.lower()
-    if any(k in name for k in ("llama", "mistral", "mixtral", "gemma", "phi")):
-        return ["q_proj", "v_proj", "k_proj", "o_proj"]
-    elif any(k in name for k in ("gpt2", "gpt_neo", "gpt_neox")):
-        return ["c_attn", "c_proj"]
-    elif "falcon" in name:
-        return ["query_key_value", "dense"]
-    elif any(k in name for k in ("bloom", "bloomz")):
-        return ["query_key_value", "dense"]
-    else:
-        return ["q_proj", "v_proj"]
+def _default_lora_targets(model_name: str) -> str:
+    return "all-linear"
 
 
 def load_model_for_rl(config: RLConfig):
