@@ -21,15 +21,14 @@ class SVDLinearFn(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         x, U, S, V = ctx.saved_tensors
-        dtype = x.dtype
         orig_shape = x.shape
 
-        go = grad_output.to(dtype)
+        go = grad_output.to(torch.float32)
         if go.dim() != 2:
             go = go.reshape(-1, go.size(-1))
 
-        x_flat = x.reshape(-1, x.size(-1))
-        U, S, V = U.to(dtype), S.to(dtype), V.to(dtype)
+        x_flat = x.reshape(-1, x.size(-1)).to(torch.float32)
+        U, S, V = U.to(torch.float32), S.to(torch.float32), V.to(torch.float32)
 
         dU = torch.matmul(go.t(), x_flat @ V.t() * S).t()
         dS = (go @ U * (x_flat @ V.t())).sum(dim=0)
