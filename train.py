@@ -7,6 +7,10 @@ from tqdm.auto import tqdm
 from accelerate import Accelerator
 
 from config import FinetuneConfig
+from model import load_model
+
+
+def init_wandb(config: FinetuneConfig, accelerator: Accelerator):
 
 
 def init_wandb(config: FinetuneConfig, accelerator: Accelerator):

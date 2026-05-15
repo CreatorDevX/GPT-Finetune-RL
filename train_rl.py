@@ -93,7 +93,7 @@ class RLConfig:
     svd_rank: int = 128
 
     # System
-    mixed_precision: str = "fp16"
+    mixed_precision: str = "bf16"
     seed: int = 42
     max_grad_norm: float = 1.0
 
@@ -119,14 +119,14 @@ def load_model_for_rl(config: RLConfig):
     model = AutoModelForCausalLM.from_pretrained(
         config.base_model_name,
         revision="step10000",
-        torch_dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
-        device_map="auto",
+        torch_dtype=torch.bfloat16,
         trust_remote_code=True,
     )
     model.config.use_cache = False
 
     if config.use_svd_quant:
         from svd_quant import apply_svd_to_model, MasterWeightManager, print_svd_info
+        print("Applying SVD factorization to base weights...")
         model = apply_svd_to_model(model, rank=config.svd_rank)
         print_svd_info(model)
         master_mgr = MasterWeightManager(model, os.path.join(config.output_dir, "master_weights.pt"))
@@ -287,7 +287,6 @@ def train_rl(config: RLConfig):
     set_seed(config.seed)
 
     model, tokenizer = load_model_for_rl(config)
-    device = next(model.parameters()).device
 
     train_ds = load_gsm8k(split="train")
     print(f"Loaded GSM8K train: {len(train_ds)} examples")

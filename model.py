@@ -40,7 +40,7 @@ def _build_quant_config(config: FinetuneConfig) -> Optional[BitsAndBytesConfig]:
     )
 
 
-def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None) -> torch.nn.Module:
+def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None, device: Optional[torch.device] = None) -> torch.nn.Module:
     model_name = config.model_local_path or config.model_name
     dtype_map = {"fp16": torch.float16, "bf16": torch.bfloat16, "no": torch.float32}
     torch_dtype = dtype_map.get(config.mixed_precision, torch.float32)
@@ -51,7 +51,6 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
         revision="step10000",
         torch_dtype=torch_dtype,
         quantization_config=quant_config,
-        device_map="auto",
         trust_remote_code=True,
     )
 
@@ -60,9 +59,12 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
     if tokenizer is not None:
         model.resize_token_embeddings(len(tokenizer))
 
+    if device is not None:
+        model = model.to(device)
+
     if config.use_svd_quant:
         from svd_quant import apply_svd_to_model, MasterWeightManager, print_svd_info
-        print("Applying SVD factorization to base weights (GPU)...")
+        print("Applying SVD factorization to base weights...")
         model = apply_svd_to_model(model, rank=config.svd_rank)
         print_svd_info(model)
         master_mgr = MasterWeightManager(model, config.master_weights_path)
@@ -93,7 +95,7 @@ def _default_lora_targets(model_name: str) -> str:
     return "all-linear"
 
 
-def generate_text(model, tokenizer, prompt: str, max_new_tokens: int = 150, device="cuda") -> str:
+def generate_text(model, tokenizer, prompt: str, max_new_tokens: int = 150, device=None) -> str:
     model.eval()
     messages = [{"role": "user", "content": prompt}]
     input_text = tokenizer.apply_chat_template(

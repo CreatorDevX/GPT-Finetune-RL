@@ -5,6 +5,7 @@ import json
 import torch
 from dataclasses import dataclass
 from typing import Optional
+from accelerate import Accelerator
 
 from config import FinetuneConfig
 from data import load_and_sample_dataset, prepare_dataset
@@ -54,7 +55,7 @@ class PipelineConfig:
     bench_batch_size: int = 8
 
     # System
-    mixed_precision: str = "fp16"
+    mixed_precision: str = "bf16"
     seed: int = 42
 
     # Resume
@@ -124,7 +125,7 @@ def run_sft(cfg: PipelineConfig):
     print(f"  Tokenized {len(tokenized):,} examples in {time_fmt(time.time() - t_tok)}")
 
     if cfg.use_svd_quant:
-        print(f"Loading model {cfg.model_name} with SVD-Int8 (rank={cfg.svd_rank})...")
+        print(f"Loading model {cfg.model_name} with SVD factorization (rank={cfg.svd_rank})...")
     else:
         print(f"Loading model {cfg.model_name} with LoRA (r={cfg.lora_r})...")
     model = load_model(sft_cfg, tokenizer)
@@ -235,13 +236,12 @@ def run_benchmark(cfg: PipelineConfig):
 
     print(f"Loading fully merged RL model from {merged_path}...")
     t_load = time.time()
-    torch_dtype = torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16
+    torch_dtype = torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(merged_path, torch_dtype=torch_dtype, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(merged_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
+    device = torch.device("cpu")
     model.config.use_cache = False
     print(f"  Loaded in {time_fmt(time.time() - t_load)}")
 
