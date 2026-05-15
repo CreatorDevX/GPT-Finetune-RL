@@ -118,7 +118,9 @@ def run_sft(cfg: PipelineConfig):
 
     print(f"Tokenizing dataset (max_len={sft_cfg.max_seq_length})...")
     t_tok = time.time()
-    tokenized = prepare_dataset(dataset, tokenizer, sft_cfg.max_seq_length)
+    import multiprocessing
+    num_proc = min(multiprocessing.cpu_count(), 8)
+    tokenized = prepare_dataset(dataset, tokenizer, sft_cfg.max_seq_length, num_proc=num_proc)
     print(f"  Tokenized {len(tokenized):,} examples in {time_fmt(time.time() - t_tok)}")
 
     if cfg.use_svd_quant:

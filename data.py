@@ -82,6 +82,7 @@ def prepare_dataset(
     dataset: Dataset,
     tokenizer: PreTrainedTokenizer,
     max_length: int,
+    num_proc: int = 4,
 ) -> Dataset:
     fn = lambda examples: tokenize_function(examples, tokenizer, max_length)
-    return dataset.map(fn, batched=True, remove_columns=dataset.column_names)
+    return dataset.map(fn, batched=True, remove_columns=dataset.column_names, num_proc=num_proc)
