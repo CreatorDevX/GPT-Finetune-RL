@@ -77,7 +77,8 @@ def run_categorical_eval(task, model, tokenizer, device, batch_size=8, max_probl
             for letter in letters:
                 if letter not in letter_to_id:
                     encoded = tokenizer.encode(letter, add_special_tokens=False)
-                    assert len(encoded) == 1
+                    if len(encoded) != 1:
+                        encoded = tokenizer.encode(" " + letter, add_special_tokens=False)
                     letter_to_id[letter] = encoded[0]
                 letter_ids.append(letter_to_id[letter])
 

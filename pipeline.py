@@ -45,6 +45,10 @@ class PipelineConfig:
     lora_alpha: int = 64
     lora_dropout: float = 0.05
 
+    # SVD-Int8
+    use_svd_quant: bool = False
+    svd_rank: int = 128
+
     # Benchmark
     bench_max_problems: Optional[int] = None
     bench_batch_size: int = 8
@@ -82,8 +86,10 @@ def run_sft(cfg: PipelineConfig):
 
     sft_cfg = FinetuneConfig(
         model_name=cfg.model_name,
-        use_lora=True,
+        use_lora=not cfg.use_svd_quant,
         use_qlora=False,
+        use_svd_quant=cfg.use_svd_quant,
+        svd_rank=cfg.svd_rank,
         lora_r=cfg.lora_r,
         lora_alpha=cfg.lora_alpha,
         lora_dropout=cfg.lora_dropout,
@@ -115,7 +121,10 @@ def run_sft(cfg: PipelineConfig):
     tokenized = prepare_dataset(dataset, tokenizer, sft_cfg.max_seq_length)
     print(f"  Tokenized {len(tokenized):,} examples in {time_fmt(time.time() - t_tok)}")
 
-    print(f"Loading model {cfg.model_name} with LoRA (r={cfg.lora_r})...")
+    if cfg.use_svd_quant:
+        print(f"Loading model {cfg.model_name} with SVD-Int8 (rank={cfg.svd_rank})...")
+    else:
+        print(f"Loading model {cfg.model_name} with LoRA (r={cfg.lora_r})...")
     model = load_model(sft_cfg, tokenizer)
 
     t_train_start = time.time()
@@ -123,13 +132,22 @@ def run_sft(cfg: PipelineConfig):
     sft_train_time = time.time() - t_train_start
     print(f"  SFT training completed in {time_fmt(sft_train_time)}")
 
-    # Merge LoRA into base model and save
-    print(f"Merging LoRA and saving merged model to {cfg.sft_output_dir}...")
-    t_merge = time.time()
-    unwrapped = model.merge_and_unload()
-    unwrapped.save_pretrained(cfg.sft_output_dir)
-    tokenizer.save_pretrained(cfg.sft_output_dir)
-    print(f"  Merged model saved in {time_fmt(time.time() - t_merge)}")
+    if cfg.use_svd_quant:
+        print(f"Saving SVD-Int8 trained model to {cfg.sft_output_dir}...")
+        t_merge = time.time()
+        unwrapped = model.merge_and_unload()
+        if hasattr(model, 'master_weight_manager'):
+            model.master_weight_manager.merge_and_save(model, os.path.join(cfg.sft_output_dir, "merged_master.pt"))
+        unwrapped.save_pretrained(cfg.sft_output_dir)
+        tokenizer.save_pretrained(cfg.sft_output_dir)
+        print(f"  Model saved in {time_fmt(time.time() - t_merge)}")
+    else:
+        print(f"Merging LoRA and saving merged model to {cfg.sft_output_dir}...")
+        t_merge = time.time()
+        unwrapped = model.merge_and_unload()
+        unwrapped.save_pretrained(cfg.sft_output_dir)
+        tokenizer.save_pretrained(cfg.sft_output_dir)
+        print(f"  Merged model saved in {time_fmt(time.time() - t_merge)}")
 
     total_time = time.time() - t_start
     print(f"Phase 1 completed in {time_fmt(total_time)}")
@@ -163,10 +181,12 @@ def run_rl(cfg: PipelineConfig):
         eval_examples=cfg.rl_eval_examples,
         base_model_name=merged_sft_path,
         sft_checkpoint=None,
-        use_lora=True,
+        use_lora=not cfg.use_svd_quant,
         lora_r=cfg.lora_r,
         lora_alpha=cfg.lora_alpha,
         lora_dropout=cfg.lora_dropout,
+        use_svd_quant=cfg.use_svd_quant,
+        svd_rank=cfg.svd_rank,
         output_dir=cfg.rl_output_dir,
         mixed_precision=cfg.mixed_precision,
         seed=cfg.seed + 1,
@@ -185,7 +205,7 @@ def run_rl(cfg: PipelineConfig):
     t_merge = time.time()
     base = AutoModelForCausalLM.from_pretrained(
         merged_sft_path,
-        dtype=torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16,
+        torch_dtype=torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16,
         trust_remote_code=True,
     )
     rl_adapter = PeftModel.from_pretrained(base, cfg.rl_output_dir)
@@ -214,7 +234,7 @@ def run_benchmark(cfg: PipelineConfig):
     print(f"Loading fully merged RL model from {merged_path}...")
     t_load = time.time()
     torch_dtype = torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16
-    model = AutoModelForCausalLM.from_pretrained(merged_path, dtype=torch_dtype, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(merged_path, torch_dtype=torch_dtype, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(merged_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -263,10 +283,12 @@ def main():
     parser.add_argument("--skip-rl", action="store_true", help="Skip RL, load existing RL model")
     parser.add_argument("--skip-benchmark", action="store_true", help="Skip benchmark")
     parser.add_argument("--bench-max-problems", type=int, default=None)
+    parser.add_argument("--use-svd-quant", action="store_true", help="Use SVD-Int8 factorization instead of LoRA")
+    parser.add_argument("--svd-rank", type=int, default=cfg.svd_rank, help="SVD rank (128 or 256)")
+    defaults = vars(parser.parse_args([]))
     args = parser.parse_args()
-
     for key, val in vars(args).items():
-        if val is not None:
+        if val != defaults.get(key):
             setattr(cfg, key, val)
 
     phases = []

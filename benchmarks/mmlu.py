@@ -39,5 +39,6 @@ class MMLU(Task):
         }
 
     def evaluate(self, conversation, assistant_response):
-        assert assistant_response in self.letters
+        if assistant_response not in self.letters:
+            return False
         return assistant_response == conversation["messages"][-1]["content"]

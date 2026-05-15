@@ -83,7 +83,7 @@ def chdir(root):
 
 
 def reliability_guard(maximum_memory_bytes: Optional[int] = None):
-    if platform.uname().system != "Darwin":
+    if platform.uname().system != "Darwin" and maximum_memory_bytes is not None:
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes))
         resource.setrlimit(resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes))

@@ -46,7 +46,8 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
         collate_fn=collate_fn,
     )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
 
     total_steps = len(train_dataloader) * config.num_epochs
     lr_scheduler = get_scheduler(
@@ -113,6 +114,12 @@ def train(config: FinetuneConfig, model, tokenizer, train_dataset):
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        accelerator.unwrap_model(model).save_pretrained(config.output_dir)
-        tokenizer.save_pretrained(config.output_dir)
-        print(f"Model saved: {config.output_dir}")
+        unwrapped = accelerator.unwrap_model(model)
+        if config.use_svd_quant and hasattr(unwrapped, 'master_weight_manager'):
+            merged_path = os.path.join(config.output_dir, "merged_master.pt")
+            unwrapped.master_weight_manager.merge_and_save(unwrapped, merged_path)
+            print(f"Master weights merged and saved: {merged_path}")
+        else:
+            unwrapped.save_pretrained(config.output_dir)
+            tokenizer.save_pretrained(config.output_dir)
+            print(f"Model saved: {config.output_dir}")

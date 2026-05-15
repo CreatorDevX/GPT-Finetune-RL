@@ -29,3 +29,7 @@ class FinetuneConfig:
     seed: int = 42
     max_grad_norm: float = 1.0
     mixed_precision: str = "fp16"  # "fp16", "bf16", or "no"
+
+    use_svd_quant: bool = False
+    svd_rank: int = 128
+    master_weights_path: str = "./master_weights.pt"

@@ -44,6 +44,9 @@ class RLConfig:
     lora_dropout: float = 0.05
     target_modules: Optional[list | str] = None
 
+    use_svd_quant: bool = False
+    svd_rank: int = 128
+
     # System
     mixed_precision: str = "fp16"
     seed: int = 42
@@ -76,26 +79,33 @@ def load_model_for_rl(config: RLConfig):
     )
     model.config.use_cache = False
 
-    loaded_sft = False
-    if config.sft_checkpoint is not None and os.path.isdir(config.sft_checkpoint):
-        model = PeftModel.from_pretrained(model, config.sft_checkpoint)
-        print(f"Loaded SFT adapter from {config.sft_checkpoint}")
-        loaded_sft = True
+    if config.use_svd_quant:
+        from svd_quant import apply_svd_quant_to_model, MasterWeightManager, print_svd_trainable_info
+        model = apply_svd_quant_to_model(model, rank=config.svd_rank)
+        print_svd_trainable_info(model)
+        master_mgr = MasterWeightManager(model, os.path.join(config.output_dir, "master_weights.pt"))
+        model.master_weight_manager = master_mgr
+    else:
+        loaded_sft = False
+        if config.sft_checkpoint is not None and os.path.isdir(config.sft_checkpoint):
+            model = PeftModel.from_pretrained(model, config.sft_checkpoint)
+            print(f"Loaded SFT adapter from {config.sft_checkpoint}")
+            loaded_sft = True
 
-    if config.use_lora and not loaded_sft:
-        targets = config.target_modules
-        if targets is None:
-            targets = _default_lora_targets(config.base_model_name)
-        lora_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            r=config.lora_r,
-            lora_alpha=config.lora_alpha,
-            lora_dropout=config.lora_dropout,
-            target_modules=targets,
-            bias="none",
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
+        if config.use_lora and not loaded_sft:
+            targets = config.target_modules
+            if targets is None:
+                targets = _default_lora_targets(config.base_model_name)
+            lora_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                r=config.lora_r,
+                lora_alpha=config.lora_alpha,
+                lora_dropout=config.lora_dropout,
+                target_modules=targets,
+                bias="none",
+            )
+            model = get_peft_model(model, lora_config)
+            model.print_trainable_parameters()
 
     return model, tokenizer
 
@@ -139,7 +149,12 @@ def generate_rollouts(model, tokenizer, questions, ground_truths, config: RLConf
             all_rewards.append(reward)
 
     rewards_t = torch.tensor(all_rewards, dtype=torch.float, device=device)
-    advantages = rewards_t - rewards_t.mean()
+    mean_r = rewards_t.mean()
+    std_r = rewards_t.std()
+    if std_r < 1e-8:
+        advantages = rewards_t - mean_r
+    else:
+        advantages = (rewards_t - mean_r) / (std_r + 1e-8)
 
     return all_rollouts, advantages
 
@@ -231,7 +246,8 @@ def train_rl(config: RLConfig):
     train_ds = load_gsm8k(split="train")
     print(f"Loaded GSM8K train: {len(train_ds)} examples")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
 
     steps_per_epoch = len(train_ds) // config.questions_per_batch
     total_steps = steps_per_epoch * config.num_epochs
@@ -322,7 +338,12 @@ def train_rl(config: RLConfig):
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        accelerator.unwrap_model(model).save_pretrained(config.output_dir)
+        unwrapped = accelerator.unwrap_model(model)
+        if config.use_svd_quant and hasattr(unwrapped, 'master_weight_manager'):
+            merged_path = os.path.join(config.output_dir, "merged_master.pt")
+            unwrapped.master_weight_manager.merge_and_save(unwrapped, merged_path)
+            print(f"Master weights merged and saved: {merged_path}")
+        unwrapped.save_pretrained(config.output_dir)
         tokenizer.save_pretrained(config.output_dir)
         print(f"Final model saved: {config.output_dir}")
         print(f"Best eval accuracy: {best_eval_acc:.4f}")

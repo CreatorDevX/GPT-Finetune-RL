@@ -49,7 +49,7 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         revision="step10000",
-        dtype=torch_dtype,
+        torch_dtype=torch_dtype,
         quantization_config=quant_config,
         device_map="auto" if quant_config else None,
         trust_remote_code=True,
@@ -59,6 +59,13 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
 
     if tokenizer is not None:
         model.resize_token_embeddings(len(tokenizer))
+
+    if config.use_svd_quant:
+        from svd_quant import apply_svd_quant_to_model, MasterWeightManager, print_svd_info
+        model = apply_svd_quant_to_model(model, rank=config.svd_rank)
+        print_svd_info(model)
+        master_mgr = MasterWeightManager(model, config.master_weights_path)
+        model.master_weight_manager = master_mgr
 
     if config.use_lora:
         if config.target_modules is None:

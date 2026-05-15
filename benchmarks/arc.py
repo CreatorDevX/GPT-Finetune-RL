@@ -33,5 +33,6 @@ class ARC(Task):
         }
 
     def evaluate(self, conversation, assistant_response):
-        assert assistant_response in conversation["letters"]
+        if assistant_response not in conversation["letters"]:
+            return False
         return assistant_response == conversation["messages"][-1]["content"]
