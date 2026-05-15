@@ -25,7 +25,7 @@ class PipelineConfig:
     sft_lr: float = 2e-4
     sft_epochs: int = 1
     sft_max_seq_len: int = 1024
-    sft_subset_fraction: float = 0.1
+    sft_subset_fraction: float = 0.05
     sft_warmup_ratio: float = 0.03
 
     # RL
@@ -185,7 +185,7 @@ def run_rl(cfg: PipelineConfig):
     t_merge = time.time()
     base = AutoModelForCausalLM.from_pretrained(
         merged_sft_path,
-        torch_dtype=torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16,
+        dtype=torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16,
         trust_remote_code=True,
     )
     rl_adapter = PeftModel.from_pretrained(base, cfg.rl_output_dir)
@@ -214,7 +214,7 @@ def run_benchmark(cfg: PipelineConfig):
     print(f"Loading fully merged RL model from {merged_path}...")
     t_load = time.time()
     torch_dtype = torch.float16 if cfg.mixed_precision == "fp16" else torch.bfloat16
-    model = AutoModelForCausalLM.from_pretrained(merged_path, torch_dtype=torch_dtype, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(merged_path, dtype=torch_dtype, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(merged_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

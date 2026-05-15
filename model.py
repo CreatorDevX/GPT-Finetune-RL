@@ -1,7 +1,10 @@
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 from typing import Optional
+
+os.environ.setdefault("PEFT_DISABLE_TORCHAO", "1")
 
 from config import FinetuneConfig
 
@@ -45,7 +48,7 @@ def load_model(config: FinetuneConfig, tokenizer: Optional[AutoTokenizer] = None
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         quantization_config=quant_config,
         device_map="auto" if quant_config else None,
         trust_remote_code=True,

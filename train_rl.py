@@ -70,7 +70,7 @@ def load_model_for_rl(config: RLConfig):
 
     model = AutoModelForCausalLM.from_pretrained(
         config.base_model_name,
-        torch_dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
+        dtype=torch.float16 if config.mixed_precision == "fp16" else torch.bfloat16,
         trust_remote_code=True,
     )
     model.config.use_cache = False
